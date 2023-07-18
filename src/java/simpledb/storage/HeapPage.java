@@ -7,6 +7,7 @@ import simpledb.common.Debug;
 import simpledb.transaction.TransactionId;
 
 import java.io.*;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 
@@ -76,8 +77,7 @@ public class HeapPage implements Page {
      */
     private int getNumTuples() {
         // TODO: some code goes here
-        return 0;
-
+        return (int) Math.floor((BufferPool.getPageSize()*8) / (td.getSize() * 8 + 1));
     }
 
     /**
@@ -86,10 +86,8 @@ public class HeapPage implements Page {
      * @return the number of bytes in the header of a page in a HeapFile with each tuple occupying tupleSize bytes
      */
     private int getHeaderSize() {
-
         // TODO: some code goes here
-        return 0;
-
+        return (int) Math.ceil(this.getNumTuples() / 8);
     }
 
     /**
@@ -122,7 +120,8 @@ public class HeapPage implements Page {
      */
     public HeapPageId getId() {
         // TODO: some code goes here
-        throw new UnsupportedOperationException("implement this");
+        return pid;
+//        throw new UnsupportedOperationException("implement this");
     }
 
     /**
@@ -294,7 +293,13 @@ public class HeapPage implements Page {
      */
     public int getNumUnusedSlots() {
         // TODO: some code goes here
-        return 0;
+        int count = 0;
+        for(int i = 0; i < numSlots; i++){
+            if(!isSlotUsed(i)){
+                count++;
+            }
+        }
+        return count;
     }
 
     /**
@@ -302,7 +307,9 @@ public class HeapPage implements Page {
      */
     public boolean isSlotUsed(int i) {
         // TODO: some code goes here
-        return false;
+        int byteNum = i / 8;
+        int bitNum = i % 8;
+        return (header[byteNum] >> bitNum & 1) == 1;
     }
 
     /**
@@ -311,6 +318,11 @@ public class HeapPage implements Page {
     private void markSlotUsed(int i, boolean value) {
         // TODO: some code goes here
         // not necessary for lab1
+        int byteNum = i / 8;
+        int bitNum = i % 8;
+        byte bit = (byte) 255;
+        bit -= (byte) 1 << bitNum;
+        header[byteNum] &= bit;
     }
 
     /**
@@ -319,7 +331,14 @@ public class HeapPage implements Page {
      */
     public Iterator<Tuple> iterator() {
         // TODO: some code goes here
-        return null;
+        ArrayList<Tuple> validTuples = new ArrayList<Tuple>();
+        for(int i = 0; i < numSlots; i++){
+            if(isSlotUsed(i)){
+                validTuples.add(tuples[i]);
+            }
+        }
+        Iterator<Tuple> tupleIterator = validTuples.iterator();
+        return tupleIterator;
     }
 
 }
