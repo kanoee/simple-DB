@@ -1,7 +1,12 @@
 package simpledb.execution;
 
 import simpledb.common.Type;
-import simpledb.storage.Tuple;
+import simpledb.storage.*;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * Knows how to compute some aggregate over a set of IntFields.
@@ -10,6 +15,94 @@ public class IntegerAggregator implements Aggregator {
 
     private static final long serialVersionUID = 1L;
 
+    private final int gbfield;
+    private final Type gbfieldtype;
+    private int afield;
+    private Op what;
+    private AggHandler aggHandler;
+    private abstract class AggHandler{
+        // 存储字段对应的聚合结果
+        Map<Field, Integer> aggResult;
+        // gbField 用于分组的字段， aggField 现阶段聚合结果
+        abstract void handle(Field gbField, IntField aggField);
+
+        public AggHandler(){
+            aggResult = new HashMap<>();
+        }
+
+        public Map<Field, Integer> getAggResult() {
+            return aggResult;
+        }
+    }
+    private class CountHandler extends AggHandler{
+        @Override
+        void handle(Field gbField, IntField aggField) {
+            if(aggResult.containsKey(gbField)){
+                aggResult.put(gbField, aggResult.get(gbField) + 1);
+            }
+            else{
+                aggResult.put(gbField, 1);
+            }
+        }
+    }
+
+    private class SumHandler extends AggHandler{
+        @Override
+        void handle(Field gbField, IntField aggField) {
+            int value = aggField.getValue();
+            if(aggResult.containsKey(gbField)){
+                aggResult.put(gbField, aggResult.get(gbField) + value);
+            }
+            else{
+                aggResult.put(gbField, value);
+            }
+        }
+    }
+
+    private class MaxHandler extends AggHandler{
+        @Override
+        void handle(Field gbField, IntField aggField) {
+            int value = aggField.getValue();
+            if(aggResult.containsKey(gbField)){
+                aggResult.put(gbField,Math.max(aggResult.get(gbField), value));
+            }
+            else{
+                aggResult.put(gbField, value);
+            }
+        }
+    }
+
+    private class MinHandler extends AggHandler{
+        @Override
+        void handle(Field gbField, IntField aggField) {
+            int value = aggField.getValue();
+            if(aggResult.containsKey(gbField)){
+                aggResult.put(gbField,Math.min(aggResult.get(gbField), value));
+            }
+            else{
+                aggResult.put(gbField, value);
+            }
+        }
+    }
+
+    private class AvgHandler extends AggHandler{
+        Map<Field, Integer> sum = new HashMap<>();
+        Map<Field, Integer> count = new HashMap<>();
+        @Override
+        void handle(Field gbField, IntField aggField) {
+            int value = aggField.getValue();
+            // 求和 + 计数
+            if(sum.containsKey(gbField) && count.containsKey(gbField)){
+                sum.put(gbField, sum.get(gbField) + value);
+                count.put(gbField, count.get(gbField) + 1);
+            }
+            else{
+                sum.put(gbField, value);
+                count.put(gbField, 1);
+            }
+            aggResult.put(gbField, sum.get(gbField) / count.get(gbField));
+        }
+    }
     /**
      * Aggregate constructor
      *
@@ -23,6 +116,30 @@ public class IntegerAggregator implements Aggregator {
 
     public IntegerAggregator(int gbfield, Type gbfieldtype, int afield, Op what) {
         // TODO: some code goes here
+        this.gbfield = gbfield;
+        this.gbfieldtype = gbfieldtype;
+        this.afield = afield;
+        this.what = what;
+        // 判读运算符号
+        switch (what){
+            case MIN:
+                aggHandler = new MinHandler();
+                break;
+            case MAX:
+                aggHandler = new MaxHandler();
+                break;
+            case AVG:
+                aggHandler = new AvgHandler();
+                break;
+            case SUM:
+                aggHandler = new SumHandler();
+                break;
+            case COUNT:
+                aggHandler = new CountHandler();
+                break;
+            default:
+                throw new IllegalArgumentException("聚合器不支持当前运算符");
+        }
     }
 
     /**
@@ -33,6 +150,10 @@ public class IntegerAggregator implements Aggregator {
      */
     public void mergeTupleIntoGroup(Tuple tup) {
         // TODO: some code goes here
+        IntField afield = (IntField) tup.getField(this.afield);
+        // 分组的字段
+        Field gbfield = this.gbfield == NO_GROUPING ? null : tup.getField(this.gbfield);
+        aggHandler.handle(gbfield, afield);
     }
 
     /**
@@ -45,8 +166,46 @@ public class IntegerAggregator implements Aggregator {
      */
     public OpIterator iterator() {
         // TODO: some code goes here
-        throw new
-        UnsupportedOperationException("please implement me for lab2");
-    }
+        // 获取聚合集
+        Map<Field, Integer> aggResult = aggHandler.getAggResult();
+        // 构建 tuple 需要
+        Type[] types;
+        String[] names;
+        TupleDesc tupleDesc;
+        // 储存结果
+        List<Tuple> tuples = new ArrayList<>();
+        // 如果没有分组
+        if(gbfield == NO_GROUPING){
+            types = new Type[]{Type.INT_TYPE};
+            names = new String[]{"aggregateVal"};
+            tupleDesc = new TupleDesc(types, names);
+            // 获取结果字段
+            IntField resultField = new IntField(aggResult.get(null));
+            // 组合成行（临时行，不需要存储，只需要设置字段值）
+            Tuple tuple = new Tuple(tupleDesc);
+            tuple.setField(0, resultField);
+            tuples.add(tuple);
+        }
+        else{
+            types = new Type[]{gbfieldtype, Type.INT_TYPE};
+            names = new String[]{"groupVal", "aggregateVal"};
+            tupleDesc = new TupleDesc(types, names);
+            for(Field field: aggResult.keySet()){
+                Tuple tuple = new Tuple(tupleDesc);
+                if(gbfieldtype == Type.INT_TYPE){
+                    IntField intField = (IntField) field;
+                    tuple.setField(0, intField);
+                }
+                else{
+                    StringField stringField = (StringField) field;
+                    tuple.setField(0, stringField);
+                }
 
+                IntField resultField = new IntField(aggResult.get(field));
+                tuple.setField(1, resultField);
+                tuples.add(tuple);
+            }
+        }
+        return new TupleIterator(tupleDesc ,tuples);
+    }
 }
