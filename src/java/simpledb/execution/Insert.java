@@ -2,11 +2,15 @@ package simpledb.execution;
 
 import simpledb.common.Database;
 import simpledb.common.DbException;
+import simpledb.common.Type;
 import simpledb.storage.BufferPool;
+import simpledb.storage.IntField;
 import simpledb.storage.Tuple;
 import simpledb.storage.TupleDesc;
 import simpledb.transaction.TransactionAbortedException;
 import simpledb.transaction.TransactionId;
+
+import java.io.IOException;
 
 /**
  * Inserts tuples read from the child operator into the tableId specified in the
@@ -16,6 +20,11 @@ public class Insert extends Operator {
 
     private static final long serialVersionUID = 1L;
 
+    private TransactionId tid;
+    private OpIterator child;
+    private final int tableId;
+    private boolean inserted;
+    private final TupleDesc tupleDesc;
     /**
      * Constructor.
      *
@@ -28,23 +37,37 @@ public class Insert extends Operator {
     public Insert(TransactionId t, OpIterator child, int tableId)
             throws DbException {
         // TODO: some code goes here
+        if(!child.getTupleDesc().equals(Database.getCatalog().getDatabaseFile(tableId).getTupleDesc())){
+            throw new DbException("插入的类型错误");
+        }
+        this.tid = t;
+        this.child = child;
+        this.tableId = tableId;
+        this.tupleDesc = new TupleDesc(new Type[]{Type.INT_TYPE}, new String[]{"the number of inserted tuple"});
+        this.inserted = false;
     }
 
     public TupleDesc getTupleDesc() {
         // TODO: some code goes here
-        return null;
+        return tupleDesc;
     }
 
     public void open() throws DbException, TransactionAbortedException {
         // TODO: some code goes here
+        child.open();
+        super.open();
     }
 
     public void close() {
         // TODO: some code goes here
+        super.close();
+        child.close();
     }
 
     public void rewind() throws DbException, TransactionAbortedException {
         // TODO: some code goes here
+        child.rewind();
+        inserted = false;
     }
 
     /**
@@ -62,17 +85,37 @@ public class Insert extends Operator {
      */
     protected Tuple fetchNext() throws TransactionAbortedException, DbException {
         // TODO: some code goes here
+        // 还未插入
+        if(!inserted){
+            // 计算插入了多少行
+            inserted = true;
+            int count = 0;
+            while (child.hasNext()){
+                Tuple tuple = child.next();
+                try{
+                    Database.getBufferPool().insertTuple(tid, tableId, tuple);
+                    count++;
+                }catch (IOException e){
+                    e.printStackTrace();
+                }
+            }
+            // 返回插入的次数 所组成的元组
+            Tuple tuple = new Tuple(tupleDesc);
+            tuple.setField(0, new IntField(count));
+            return tuple;
+        }
         return null;
     }
 
     @Override
     public OpIterator[] getChildren() {
         // TODO: some code goes here
-        return null;
+        return new OpIterator[]{child};
     }
 
     @Override
     public void setChildren(OpIterator[] children) {
         // TODO: some code goes here
+        this.child = children[0];
     }
 }
